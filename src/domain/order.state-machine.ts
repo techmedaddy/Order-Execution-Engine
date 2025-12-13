@@ -24,3 +24,7 @@ export function assertValidTransition(
     throw new Error(`Invalid transition from ${current} to ${next}`);
   }
 }
+
+export function isTerminalState(status: OrderStatus): boolean {
+  return [OrderStatus.SUCCESS, OrderStatus.FAILED].includes(status);
+}

@@ -72,6 +72,17 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   );
 }
 
+export async function transitionToTerminalStatus(orderId: string, status: OrderStatus): Promise<boolean> {
+  const result = await pgPool.query(
+    `UPDATE orders 
+     SET status = $1, updated_at = NOW() 
+     WHERE id = $2 AND status = 'EXECUTING'
+     RETURNING id`,
+    [status, orderId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function findOrderById(orderId: string): Promise<Order | null> {
   const result = await pgPool.query(
     'SELECT id, payload, status, created_at, updated_at FROM orders WHERE id = $1',
