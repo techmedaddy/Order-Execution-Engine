@@ -1,50 +1,165 @@
 # Order Execution Engine
 
-## System Description
-A high-throughput order execution engine built with Node.js and TypeScript. It accepts order requests via a REST API, processes them asynchronously using a persistent queue, executes trades against mock decentralized exchanges (DEXs), and streams real-time status updates to clients via WebSockets.
+## 1. Project Overview
 
-## Architecture
+This system is a backend-only asynchronous order execution engine designed to handle high-throughput trade requests with strict correctness guarantees. It solves the problem of reliably processing financial transactions in a distributed environment where network failures, race conditions, and duplicate requests are common.
+
+The system ensures at-least-once message handling while enforcing exactly-once side effects through database-level idempotency and atomic state transitions. It is built to be deterministic, observable, and resilient to concurrent execution hazards.
+
+## 2. High-Level Architecture
+
+The system follows a unidirectional pipeline architecture:
+
 ```
-[Client] <---> [Fastify API] ----> [PostgreSQL]
-   ^               |
-   |               v
-   |           [Redis Queue]
-   |               |
-   |               v
-   +---------- [Order Worker] ----> [Mock DEX]
-                   |
-                   +--------------> [PostgreSQL]
+Client
+  ↓
+HTTP API (Fastify)
+  ↓
+PostgreSQL (Source of Truth)
+  ↓
+Redis Queue (BullMQ)
+  ↓
+Worker (Stateless)
+  ↓
+Mock DEX Execution
+  ↓
+PostgreSQL + Redis (State Update)
+  ↓
+WebSocket Events (Observability)
 ```
 
-## Order Lifecycle
-Transitions are strict and irreversible.
-1.  **CREATED**: Order persisted in database.
-2.  **QUEUED**: Job added to execution queue.
-3.  **EXECUTING**: Worker atomically claims order.
-4.  **SUCCESS**: Trade executed successfully (Terminal).
-5.  **FAILED**: Execution failed or rejected (Terminal).
+**Architectural Decisions:**
+*   **Separation of Concerns:** API handles ingestion, Workers handle execution. This allows independent scaling of ingestion throughput vs. execution latency.
+*   **Failure Isolation:** Worker failures do not impact API availability.
+*   **Horizontal Scalability:** Stateless workers can be scaled horizontally, limited only by database and queue throughput.
 
-## Idempotency Strategy
-Clients must provide a unique `Idempotency-Key` HTTP header.
-*   **Database**: `idempotency_key` column has a `UNIQUE` constraint.
-*   **Logic**: Uses `INSERT ... ON CONFLICT DO NOTHING`.
-*   **Behavior**: Duplicate keys return the existing `orderId` immediately without creating new records or triggering duplicate execution jobs.
+## 3. Core Design Principles
 
-## Concurrency Strategy
-Race conditions are prevented via atomic database updates.
-*   **Mechanism**: Workers execute `UPDATE orders SET status = 'EXECUTING' ... WHERE id = $1 AND status = 'QUEUED'`.
-*   **Guarantee**: Only one worker can successfully update the row. If the update affects zero rows, the worker exits immediately.
+*   **Database as Source of Truth:** All state is persisted in PostgreSQL before any action is taken. In-memory state is treated as ephemeral.
+*   **Idempotency by Design:** Duplicate requests are handled gracefully at the database level, preventing duplicate orders or double-spending.
+*   **Stateless Workers:** Workers do not maintain local state between jobs, ensuring any worker can process any job.
+*   **Explicit State Machines:** Order transitions are strictly defined and validated. Invalid transitions result in immediate rejection.
+*   **Terminal State Safety:** Once an order reaches a terminal state (SUCCESS/FAILED), it is immutable.
 
-## Failure Handling
-*   **Simulation**: Set `MOCK_DEX_FORCE_FAIL=true` in `.env` to force execution errors.
-*   **Behavior**: Any error during execution immediately transitions the order to `FAILED`.
-*   **Retries**: Disabled by design (max attempts = 1).
-*   **Terminality**: Once `FAILED` (or `SUCCESS`), an order cannot be modified or re-executed.
+## 4. Order Lifecycle & State Machine
 
-## How to Run
+The order lifecycle is governed by a strict directed acyclic graph (DAG):
 
-1.  **Prerequisites**: Node.js, PostgreSQL, Redis (must run in WSL on Windows).
-2.  **Environment**: Create a `.env` file:
+```
+CREATED → QUEUED → EXECUTING → SUCCESS
+                      ↘
+                       FAILED
+```
+
+*   **CREATED:** Order is persisted in the database.
+*   **QUEUED:** Order is added to the Redis queue for processing.
+*   **EXECUTING:** A worker has atomically claimed the order.
+*   **SUCCESS:** The trade was executed successfully on the DEX (Terminal).
+*   **FAILED:** The execution failed or was rejected (Terminal).
+
+**Enforcement:**
+State transitions are validated in the domain layer. Attempting to transition from `FAILED` to `SUCCESS` or skipping `EXECUTING` throws a domain error.
+
+## 5. Idempotency Strategy
+
+Idempotency is enforced to prevent duplicate order creation from retried client requests.
+
+1.  **Client Responsibility:** Must provide a unique `Idempotency-Key` header.
+2.  **Database Constraint:** The `orders` table has a `UNIQUE` constraint on the `idempotency_key` column.
+3.  **Resolution Logic:**
+    *   Request received.
+    *   Attempt `INSERT ... ON CONFLICT DO NOTHING`.
+    *   If conflict: Return existing order ID.
+    *   If success: Return new order ID and enqueue job.
+
+This guarantees that multiple API calls with the same key result in exactly one database record and one execution job.
+
+## 6. Concurrency & Atomic Execution
+
+To prevent race conditions where multiple workers might attempt to process the same order (e.g., due to queue visibility timeouts), execution ownership is claimed atomically.
+
+**Atomic Claim Pattern:**
+```sql
+UPDATE orders
+SET status = 'EXECUTING', updated_at = NOW()
+WHERE id = $1 AND status = 'QUEUED'
+RETURNING *;
+```
+
+*   If the query returns a row, the worker owns the order and proceeds.
+*   If the query returns no rows, the worker assumes another process claimed it and exits silently.
+This eliminates the "check-then-act" race condition common in distributed systems.
+
+## 7. Failure Handling & Retry Boundaries
+
+*   **Failure Detection:** Any exception thrown during the execution phase (DEX call, DB update) is caught by the worker.
+*   **Terminal States:** Upon failure, the order is immediately transitioned to `FAILED`.
+*   **Bounded Retries:** Retries are intentionally disabled (Max Attempts = 1). In a financial context, silent retries can be dangerous. Failures are terminal and require manual intervention or a new order request.
+*   **Partial Failures:** Database updates and WebSocket events are synchronized to ensure clients never see a "ghost" state.
+
+## 8. WebSocket Event Model
+
+WebSockets provide real-time observability into the order lifecycle.
+
+*   **Ordered Delivery:** Events are emitted immediately after state transitions.
+*   **Payload Structure:**
+    ```json
+    {
+      "orderId": "550e8400-e29b-41d4-a716-446655440000",
+      "previousStatus": "QUEUED",
+      "currentStatus": "EXECUTING",
+      "timestamp": "2023-10-27T10:00:00.000Z"
+    }
+    ```
+*   **Guarantees:** Terminal events (SUCCESS/FAILED) are emitted exactly once per order.
+
+## 9. API Endpoints
+
+### POST /api/orders/execute
+Submits a new order for execution.
+*   **Headers:** `Idempotency-Key` (Required, String)
+*   **Body:** `{ "baseToken": "SOL", "quoteToken": "USDC", "amount": 100 }`
+*   **Response:** `202 Accepted` `{ "orderId": "..." }`
+
+### GET /api/orders/:id
+Retrieves the current state of an order.
+*   **Response:** `{ "orderId": "...", "status": "...", "payload": {...}, "createdAt": "..." }`
+
+### GET /health
+Operational health check.
+*   **Response:** `200 OK` `{ "ok": true }`
+
+## 10. Tech Stack
+
+*   **Node.js + TypeScript:** Provides strong typing for domain logic and high concurrency for I/O-bound operations.
+*   **Fastify:** Low-overhead web framework optimized for throughput.
+*   **PostgreSQL:** Relational database chosen for ACID compliance and strict schema enforcement.
+*   **Redis + BullMQ:** Robust message queue for asynchronous job processing with atomic job locking.
+*   **WebSockets (ws):** Standard protocol for real-time event streaming.
+
+## 11. Local Development Setup (WSL-friendly)
+
+For Windows users, running inside WSL (Windows Subsystem for Linux) is required due to Redis persistence dependencies.
+
+1.  **Prerequisites:**
+    *   Node.js v18+
+    *   PostgreSQL running locally
+    *   Redis running locally
+
+2.  **Installation:**
+    ```bash
+    npm install
+    ```
+
+3.  **Database Setup:**
+    Ensure the database exists and apply the schema (idempotency constraint is critical).
+    ```sql
+    CREATE DATABASE order_engine;
+    -- (Schema migration is handled via code/SQL provided in repository)
+    ```
+
+4.  **Configuration:**
+    Create `.env`:
     ```env
     NODE_ENV=development
     PORT=7542
@@ -52,15 +167,20 @@ Race conditions are prevented via atomic database updates.
     REDIS_URL=redis://localhost:6379
     MOCK_DEX_FORCE_FAIL=false
     ```
-3.  **Database Setup**: Ensure the `orders` table exists and has the unique constraint:
-    ```sql
-    ALTER TABLE orders ADD COLUMN idempotency_key TEXT UNIQUE;
-    ```
-4.  **Start**:
+
+5.  **Run:**
     ```bash
-    npm install
     npm run dev
     ```
-5.  **Verify**:
-    *   Health: `GET http://localhost:7542/health`
-    *   Execute: `POST http://localhost:7542/api/orders/execute`
+
+## 12. Trade-offs & Future Improvements
+
+*   **Authentication:** Omitted for scope. Production would require JWT/API Key authentication.
+*   **Rate Limiting:** Not implemented. Essential for protecting the API from abuse.
+*   **Dead Letter Queue (DLQ):** Failed jobs currently stay in the failed set. A DLQ would allow for inspection and manual replay.
+*   **Metrics:** Prometheus/Grafana integration would be added for monitoring queue depth and execution latency.
+
+## 13. Final Notes
+
+This assignment demonstrates the implementation of a robust, concurrency-safe backend system. It prioritizes correctness over feature breadth, ensuring that financial primitives (orders) are handled with strict guarantees against double-execution and race conditions. The system assumes a reliable database and queue infrastructure to maintain data integrity.
+
