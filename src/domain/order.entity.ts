@@ -14,7 +14,7 @@ export function createOrder(id: string, payload: OrderPayload, idempotencyKey?: 
   return {
     id,
     payload,
-    status: OrderStatus.PENDING,
+    status: OrderStatus.CREATED,
     createdAt: now,
     updatedAt: now,
     idempotencyKey

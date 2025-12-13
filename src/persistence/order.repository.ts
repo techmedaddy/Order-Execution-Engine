@@ -92,3 +92,28 @@ export async function findOrderById(orderId: string): Promise<Order | null> {
     updatedAt: row.updated_at
   };
 }
+
+export async function claimOrderForExecution(orderId: string): Promise<Order | null> {
+  const result = await pgPool.query(
+    `UPDATE orders 
+     SET status = 'EXECUTING', updated_at = NOW() 
+     WHERE id = $1 AND status = 'QUEUED' 
+     RETURNING id, payload, status, created_at, updated_at, idempotency_key`,
+    [orderId]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+
+  return {
+    id: row.id,
+    payload: row.payload,
+    status: row.status as OrderStatus,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    idempotencyKey: row.idempotency_key
+  };
+}

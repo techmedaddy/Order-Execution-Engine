@@ -3,11 +3,10 @@ export enum OrderType {
 }
 
 export enum OrderStatus {
-  PENDING = 'PENDING',
-  ROUTING = 'ROUTING',
-  BUILDING = 'BUILDING',
-  SUBMITTED = 'SUBMITTED',
-  CONFIRMED = 'CONFIRMED',
+  CREATED = 'CREATED',
+  QUEUED = 'QUEUED',
+  EXECUTING = 'EXECUTING',
+  SUCCESS = 'SUCCESS',
   FAILED = 'FAILED'
 }
 

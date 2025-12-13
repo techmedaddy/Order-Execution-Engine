@@ -1,11 +1,10 @@
 import { OrderStatus } from './order.types';
 
 export const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  [OrderStatus.PENDING]: [OrderStatus.ROUTING],
-  [OrderStatus.ROUTING]: [OrderStatus.BUILDING, OrderStatus.FAILED],
-  [OrderStatus.BUILDING]: [OrderStatus.SUBMITTED, OrderStatus.FAILED],
-  [OrderStatus.SUBMITTED]: [OrderStatus.CONFIRMED, OrderStatus.FAILED],
-  [OrderStatus.CONFIRMED]: [],
+  [OrderStatus.CREATED]: [OrderStatus.QUEUED],
+  [OrderStatus.QUEUED]: [OrderStatus.EXECUTING],
+  [OrderStatus.EXECUTING]: [OrderStatus.SUCCESS, OrderStatus.FAILED],
+  [OrderStatus.SUCCESS]: [],
   [OrderStatus.FAILED]: []
 };
 

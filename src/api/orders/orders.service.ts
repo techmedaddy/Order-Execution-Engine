@@ -2,8 +2,8 @@ import { randomUUID } from 'crypto';
 import { ExecuteOrderRequest } from './orders.schema';
 import { orderQueue } from '../../queue/order.queue';
 import { createOrder } from '../../domain/order.entity';
-import { createOrder as persistOrder } from '../../persistence/order.repository';
-import { OrderType } from '../../domain/order.types';
+import { createOrder as persistOrder, updateOrderStatus } from '../../persistence/order.repository';
+import { OrderType, OrderStatus } from '../../domain/order.types';
 
 export async function executeOrderService(
   body: ExecuteOrderRequest,
@@ -28,6 +28,8 @@ export async function executeOrderService(
 
   // Only queue if this is a new order (persisted ID matches generated ID)
   if (persistedOrderId === orderId) {
+    await updateOrderStatus(orderId, OrderStatus.QUEUED);
+    
     await orderQueue.add('execute-order', {
       orderId,
       payload
