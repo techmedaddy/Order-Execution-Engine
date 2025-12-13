@@ -16,6 +16,7 @@ export interface OrderPayload {
   quoteToken: string;
   amount: number;
   type: OrderType;
+  idempotencyKey?: string;
 }
 
 export interface ExecutionResult {

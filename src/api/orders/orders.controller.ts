@@ -1,29 +1,17 @@
-import { randomUUID } from 'crypto';
 import { ExecuteOrderRequestSchema } from './orders.schema';
-import { orderQueue } from '../../queue/order.queue';
-import { createOrder } from '../../domain/order.entity';
-import { createOrder as persistOrder } from '../../persistence/order.repository';
-import { OrderType } from '../../domain/order.types';
+import { executeOrderService } from './orders.service';
 
 export async function executeOrderController(request: any, reply: any): Promise<void> {
+  const idempotencyKey = request.headers['idempotency-key'];
+
+  if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
+    reply.code(400).send({ error: 'Idempotency-Key header is required' });
+    return;
+  }
+
   const body = ExecuteOrderRequestSchema.parse(request.body);
-  const orderId = randomUUID();
 
-  const payload = {
-    baseToken: body.baseToken,
-    quoteToken: body.quoteToken,
-    amount: body.amount,
-    type: OrderType.MARKET
-  };
-
-  const order = createOrder(orderId, payload);
-
-  await persistOrder(order);
-
-  await orderQueue.add('execute-order', {
-    orderId,
-    payload
-  });
+  const orderId = await executeOrderService(body, idempotencyKey);
 
   reply.code(202).send({ orderId });
 }

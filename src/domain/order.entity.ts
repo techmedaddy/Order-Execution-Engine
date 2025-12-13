@@ -6,16 +6,18 @@ export interface Order {
   status: OrderStatus;
   createdAt: Date;
   updatedAt: Date;
+  idempotencyKey?: string;
 }
 
-export function createOrder(id: string, payload: OrderPayload): Order {
+export function createOrder(id: string, payload: OrderPayload, idempotencyKey?: string): Order {
   const now = new Date();
   return {
     id,
     payload,
     status: OrderStatus.PENDING,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    idempotencyKey
   };
 }
 
