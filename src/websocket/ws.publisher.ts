@@ -1,6 +1,5 @@
-import { WebSocket } from 'ws';
-import { wsClients } from './ws.server';
-import { OrderStatus } from '../domain/order.types';
+import { wsClients } from "./ws.server";
+import { OrderStatus } from "../domain/order.types";
 
 export function publishOrderEvent(
   orderId: string,
@@ -10,11 +9,11 @@ export function publishOrderEvent(
   const message = JSON.stringify({
     orderId,
     status,
-    meta
+    meta,
   });
 
   for (const client of wsClients) {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === 1) {
       client.send(message);
     }
   }
