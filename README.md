@@ -8,30 +8,54 @@ The system ensures at-least-once message handling while enforcing exactly-once s
 
 ## 2. High-Level Architecture
 
-The system follows a unidirectional pipeline architecture:
+The system follows a unidirectional pipeline architecture designed for high throughput and fault isolation.
 
-```
-Client
-  ↓
-HTTP API (Fastify)
-  ↓
-PostgreSQL (Source of Truth)
-  ↓
-Redis Queue (BullMQ)
-  ↓
-Worker (Stateless)
-  ↓
-Mock DEX Execution
-  ↓
-PostgreSQL + Redis (State Update)
-  ↓
-WebSocket Events (Observability)
+```mermaid
+flowchart LR
+  subgraph ClientLayer [Client Layer]
+    Client[HTTP Client]
+  end
+
+  subgraph APILayer [API Layer]
+    API[Fastify API]
+  end
+
+  subgraph PersistenceLayer [Persistence Layer]
+    DB[(PostgreSQL)]
+  end
+
+  subgraph QueueLayer [Queue Layer]
+    Q[Redis / BullMQ]
+  end
+
+  subgraph WorkerLayer [Worker Layer]
+    W[Stateless Worker]
+  end
+
+  subgraph ExternalLayer [External Dependency]
+    DEX[Mock DEX]
+  end
+
+  subgraph ObservabilityLayer [Observability Layer]
+    WS[WebSocket Events]
+  end
+
+  Client -->|POST /execute| API
+  API -->|1. Persist Order| DB
+  API -->|2. Enqueue Job| Q
+  Q -->|3. Process Job| W
+  W -->|4. Atomic Claim| DB
+  W -->|5. Execute Trade| DEX
+  DEX -->|6. Result| W
+  W -->|7. Update State| DB
+  DB -.->|8. Emit Event| WS
+  WS -.->|Stream Updates| Client
 ```
 
 **Architectural Decisions:**
-*   **Separation of Concerns:** API handles ingestion, Workers handle execution. This allows independent scaling of ingestion throughput vs. execution latency.
-*   **Failure Isolation:** Worker failures do not impact API availability.
-*   **Horizontal Scalability:** Stateless workers can be scaled horizontally, limited only by database and queue throughput.
+*   **Async Boundaries:** The API layer is decoupled from execution via the Redis queue. This ensures that slow DEX executions or worker failures do not impact API availability or latency.
+*   **Database as Source of Truth:** All state changes (Creation, Claiming, Finalization) are persisted to PostgreSQL *before* any side effects occur. This guarantees data integrity even if a worker crashes mid-process.
+*   **Stateless Workers:** Workers maintain no local state. Any worker can process any job, allowing for effortless horizontal scaling.
 
 ## 3. Core Design Principles
 
@@ -43,22 +67,60 @@ WebSocket Events (Observability)
 
 ## 4. Order Lifecycle & State Machine
 
-The order lifecycle is governed by a strict directed acyclic graph (DAG):
+The order lifecycle is governed by a strict directed acyclic graph (DAG), enforced via atomic database operations.
 
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant DB as PostgreSQL
+  participant Queue as Redis/BullMQ
+  participant Worker
+  participant DEX as Mock DEX
+  participant WS as WebSocket
+
+  Client->>API: POST /orders (Idempotency-Key)
+  API->>DB: INSERT ... ON CONFLICT DO NOTHING
+  alt Duplicate Request
+    DB-->>API: Return Existing Order ID
+    API-->>Client: 202 Accepted (Existing ID)
+  else New Request
+    DB-->>API: Return New Order ID
+    API->>Queue: Add Job (QUEUED)
+    API-->>Client: 202 Accepted (New ID)
+  end
+
+  Queue->>Worker: Deliver Job
+  
+  Note over Worker, DB: Atomic Claim (Concurrency Safety)
+  Worker->>DB: UPDATE ... WHERE status='QUEUED'
+  
+  alt Claim Failed (Race Condition)
+    DB-->>Worker: 0 rows updated
+    Worker->>Worker: Exit Silently
+  else Claim Success
+    DB-->>Worker: 1 row updated (EXECUTING)
+    
+    alt Execution Success
+      Worker->>DEX: Execute Trade
+      DEX-->>Worker: Success Result
+      Worker->>DB: UPDATE status='SUCCESS'
+      DB-->>WS: Trigger Event
+      WS-->>Client: { status: "SUCCESS" }
+    else Execution Failure
+      Worker->>DEX: Execute Trade
+      DEX-->>Worker: Error / Timeout
+      Worker->>DB: UPDATE status='FAILED'
+      DB-->>WS: Trigger Event
+      WS-->>Client: { status: "FAILED" }
+    end
+  end
 ```
-CREATED → QUEUED → EXECUTING → SUCCESS
-                      ↘
-                       FAILED
-```
 
-*   **CREATED:** Order is persisted in the database.
-*   **QUEUED:** Order is added to the Redis queue for processing.
-*   **EXECUTING:** A worker has atomically claimed the order.
-*   **SUCCESS:** The trade was executed successfully on the DEX (Terminal).
-*   **FAILED:** The execution failed or was rejected (Terminal).
-
-**Enforcement:**
-State transitions are validated in the domain layer. Attempting to transition from `FAILED` to `SUCCESS` or skipping `EXECUTING` throws a domain error.
+**Key Mechanisms:**
+*   **Atomic DB Claim:** The `UPDATE ... WHERE status='QUEUED'` query ensures that only one worker can ever execute a specific order, effectively eliminating race conditions.
+*   **Terminal State Safety:** Once an order reaches `SUCCESS` or `FAILED`, the worker logic prevents any further processing or state changes.
+*   **Observability:** WebSocket events are emitted only after the database transaction is committed, ensuring clients never receive updates for unpersisted states.
 
 ## 5. Idempotency Strategy
 
