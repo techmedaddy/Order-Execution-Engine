@@ -24,7 +24,7 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
 
   // Sync state for EXECUTING (since claim updated DB)
   await setOrderStatus(order.id, OrderStatus.EXECUTING);
-  publishOrderEvent(order.id, OrderStatus.EXECUTING);
+  publishOrderEvent(order.id, OrderStatus.QUEUED, OrderStatus.EXECUTING);
 
   try {
     // 3. Execute mock DEX logic
@@ -38,7 +38,7 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
     if (updated) {
       // 6. Emit WebSocket event for the final status
       await setOrderStatus(order.id, OrderStatus.SUCCESS);
-      publishOrderEvent(order.id, OrderStatus.SUCCESS, { ...result });
+      publishOrderEvent(order.id, OrderStatus.EXECUTING, OrderStatus.SUCCESS, { ...result });
     }
 
   } catch (error) {
@@ -51,7 +51,7 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
     if (updated) {
       // 6. Emit WebSocket event for the final status
       await setOrderStatus(order.id, OrderStatus.FAILED);
-      publishOrderEvent(order.id, OrderStatus.FAILED, { error: errorMessage });
+      publishOrderEvent(order.id, OrderStatus.EXECUTING, OrderStatus.FAILED, { error: errorMessage });
     }
     
     // Retries are intentionally disabled.

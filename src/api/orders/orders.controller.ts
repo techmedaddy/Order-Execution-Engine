@@ -1,5 +1,6 @@
 import { ExecuteOrderRequestSchema } from './orders.schema';
 import { executeOrderService } from './orders.service';
+import { findOrderById } from '../../persistence/order.repository';
 
 export async function executeOrderController(request: any, reply: any): Promise<void> {
   const idempotencyKey = request.headers['idempotency-key'];
@@ -14,4 +15,23 @@ export async function executeOrderController(request: any, reply: any): Promise<
   const orderId = await executeOrderService(body, idempotencyKey);
 
   reply.code(202).send({ orderId });
+}
+
+export async function getOrderController(request: any, reply: any): Promise<void> {
+  const { id } = request.params;
+
+  const order = await findOrderById(id);
+
+  if (!order) {
+    reply.code(404).send({ error: 'Order not found' });
+    return;
+  }
+
+  reply.send({
+    orderId: order.id,
+    payload: order.payload,
+    status: order.status,
+    createdAt: order.createdAt.toISOString(),
+    updatedAt: order.updatedAt.toISOString()
+  });
 }

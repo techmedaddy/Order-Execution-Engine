@@ -1,5 +1,6 @@
 import { DexAdapter } from '../dex.interface';
 import { OrderPayload, ExecutionResult } from '../../domain/order.types';
+import { env } from '../../config/env';
 
 export function createMockDexAdapter(
   name: 'RAYDIUM' | 'METEORA',
@@ -22,6 +23,10 @@ export function createMockDexAdapter(
     async executeSwap(payload: OrderPayload): Promise<ExecutionResult> {
       const delay = Math.floor(Math.random() * (400 - 100 + 1)) + 100;
       await new Promise(resolve => setTimeout(resolve, delay));
+
+      if (env.MOCK_DEX_FORCE_FAIL) {
+        throw new Error(`Forced failure: MOCK_DEX_FORCE_FAIL is enabled`);
+      }
 
       if (Math.random() < failureRate) {
         throw new Error(`Swap execution failed on ${name}`);

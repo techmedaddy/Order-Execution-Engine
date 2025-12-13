@@ -3,12 +3,15 @@ import { OrderStatus } from "../domain/order.types";
 
 export function publishOrderEvent(
   orderId: string,
-  status: OrderStatus,
+  previousStatus: OrderStatus | null,
+  currentStatus: OrderStatus,
   meta?: Record<string, unknown>
 ): void {
   const message = JSON.stringify({
     orderId,
-    status,
+    previousStatus,
+    currentStatus,
+    timestamp: new Date().toISOString(),
     meta,
   });
 

@@ -7,9 +7,10 @@ export interface EnvConfig {
   PORT: number;
   REDIS_URL: string;
   DATABASE_URL: string;
+  MOCK_DEX_FORCE_FAIL: boolean;
 }
 
-const { NODE_ENV, PORT, REDIS_URL, DATABASE_URL } = process.env;
+const { NODE_ENV, PORT, REDIS_URL, DATABASE_URL, MOCK_DEX_FORCE_FAIL } = process.env;
 
 if (!NODE_ENV || (NODE_ENV !== 'development' && NODE_ENV !== 'test' && NODE_ENV !== 'production')) {
   throw new Error('NODE_ENV is missing or invalid');
@@ -37,5 +38,6 @@ export const env: EnvConfig = {
   NODE_ENV: NODE_ENV as EnvConfig['NODE_ENV'],
   PORT: parsedPort,
   REDIS_URL,
-  DATABASE_URL
+  DATABASE_URL,
+  MOCK_DEX_FORCE_FAIL: MOCK_DEX_FORCE_FAIL === 'true'
 };

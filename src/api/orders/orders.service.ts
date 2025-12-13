@@ -4,6 +4,7 @@ import { orderQueue } from '../../queue/order.queue';
 import { createOrder } from '../../domain/order.entity';
 import { createOrder as persistOrder, updateOrderStatus } from '../../persistence/order.repository';
 import { OrderType, OrderStatus } from '../../domain/order.types';
+import { publishOrderEvent } from '../../websocket/ws.publisher';
 
 export async function executeOrderService(
   body: ExecuteOrderRequest,
@@ -28,7 +29,12 @@ export async function executeOrderService(
 
   // Only queue if this is a new order (persisted ID matches generated ID)
   if (persistedOrderId === orderId) {
+    // Emit CREATED event
+    publishOrderEvent(orderId, null, OrderStatus.CREATED);
+
     await updateOrderStatus(orderId, OrderStatus.QUEUED);
+    // Emit QUEUED event
+    publishOrderEvent(orderId, OrderStatus.CREATED, OrderStatus.QUEUED);
     
     await orderQueue.add('execute-order', {
       orderId,
