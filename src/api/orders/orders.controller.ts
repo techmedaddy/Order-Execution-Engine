@@ -1,6 +1,7 @@
 import { ExecuteOrderRequestSchema } from './orders.schema';
 import { executeOrderService } from './orders.service';
 import { findOrderById } from '../../persistence/order.repository';
+import { ZodError } from 'zod';
 
 export async function executeOrderController(request: any, reply: any): Promise<void> {
   const idempotencyKey = request.headers['idempotency-key'];
@@ -10,7 +11,20 @@ export async function executeOrderController(request: any, reply: any): Promise<
     return;
   }
 
-  const body = ExecuteOrderRequestSchema.parse(request.body);
+  let body;
+  try {
+    body = ExecuteOrderRequestSchema.parse(request.body);
+  } catch (err) {
+  if (err instanceof ZodError) {
+    reply.code(400).send({
+      error: 'Invalid request payload',
+      details: err.issues, // ✅ NOT err.errors
+    });
+    return;
+  }
+  throw err; // real server bug
+}
+
 
   const orderId = await executeOrderService(body, idempotencyKey);
 
