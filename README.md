@@ -65,9 +65,31 @@ flowchart LR
 *   **Explicit State Machines:** Order transitions are strictly defined and validated. Invalid transitions result in immediate rejection.
 *   **Terminal State Safety:** Once an order reaches a terminal state (SUCCESS/FAILED), it is immutable.
 
-## 4. Order Lifecycle & State Machine
+## 4. Core Data Model Overview
+
+The system relies on a single primary entity, the **Order**, which serves as the source of truth for all state transitions.
+
+**Order Entity Schema:**
+*   **id** (UUID): Unique identifier for the order.
+*   **payload** (JSONB): Immutable trade details (Token pair, Amount, Type).
+*   **status** (Enum): Current state of the order (`CREATED`, `QUEUED`, `EXECUTING`, `SUCCESS`, `FAILED`).
+*   **idempotencyKey** (String, Unique): Client-provided key to prevent duplicate processing.
+*   **createdAt** (Timestamp): When the order was first persisted.
+*   **updatedAt** (Timestamp): Last state transition time.
+
+## 5. Order Lifecycle & State Machine
 
 The order lifecycle is governed by a strict directed acyclic graph (DAG), enforced via atomic database operations.
+
+### Order States
+
+| State | Description |
+| :--- | :--- |
+| **CREATED** | Order has been validated and persisted in the database. |
+| **QUEUED** | Order has been pushed to the Redis queue for processing. |
+| **EXECUTING** | A worker has atomically claimed the order and is attempting the trade. |
+| **SUCCESS** | Trade executed successfully on the DEX. Terminal state. |
+| **FAILED** | Execution failed due to error or rejection. Terminal state. |
 
 ```mermaid
 sequenceDiagram
@@ -122,7 +144,7 @@ sequenceDiagram
 *   **Terminal State Safety:** Once an order reaches `SUCCESS` or `FAILED`, the worker logic prevents any further processing or state changes.
 *   **Observability:** WebSocket events are emitted only after the database transaction is committed, ensuring clients never receive updates for unpersisted states.
 
-## 5. Idempotency Strategy
+## 6. Idempotency Strategy
 
 Idempotency is enforced to prevent duplicate order creation from retried client requests.
 
@@ -136,7 +158,7 @@ Idempotency is enforced to prevent duplicate order creation from retried client 
 
 This guarantees that multiple API calls with the same key result in exactly one database record and one execution job.
 
-## 6. Concurrency & Atomic Execution
+## 7. Concurrency & Atomic Execution
 
 To prevent race conditions where multiple workers might attempt to process the same order (e.g., due to queue visibility timeouts), execution ownership is claimed atomically.
 
@@ -152,14 +174,14 @@ RETURNING *;
 *   If the query returns no rows, the worker assumes another process claimed it and exits silently.
 This eliminates the "check-then-act" race condition common in distributed systems.
 
-## 7. Failure Handling & Retry Boundaries
+## 8. Failure Handling & Retry Boundaries
 
 *   **Failure Detection:** Any exception thrown during the execution phase (DEX call, DB update) is caught by the worker.
 *   **Terminal States:** Upon failure, the order is immediately transitioned to `FAILED`.
 *   **Bounded Retries:** Retries are intentionally disabled (Max Attempts = 1). In a financial context, silent retries can be dangerous. Failures are terminal and require manual intervention or a new order request.
 *   **Partial Failures:** Database updates and WebSocket events are synchronized to ensure clients never see a "ghost" state.
 
-## 8. WebSocket Event Model
+## 9. WebSocket Event Model
 
 WebSockets provide real-time observability into the order lifecycle.
 
@@ -175,7 +197,7 @@ WebSockets provide real-time observability into the order lifecycle.
     ```
 *   **Guarantees:** Terminal events (SUCCESS/FAILED) are emitted exactly once per order.
 
-## 9. API Endpoints
+## 10. API Endpoints
 
 ### POST /api/orders/execute
 Submits a new order for execution.
@@ -191,7 +213,59 @@ Retrieves the current state of an order.
 Operational health check.
 *   **Response:** `200 OK` `{ "ok": true }`
 
-## 10. Tech Stack
+## 11. API Usage Examples
+
+### Execute Order
+**Request:**
+`POST /api/orders/execute`
+Headers: `Idempotency-Key: <unique-uuid>`
+
+```json
+{
+  "baseToken": "SOL",
+  "quoteToken": "USDC",
+  "amount": 1.5
+}
+```
+
+**Response (Success):**
+`202 Accepted`
+```json
+{
+  "orderId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response (Error - Missing Header):**
+`400 Bad Request`
+```json
+{
+  "error": "Idempotency-Key header is required"
+}
+```
+
+### Get Order Status
+**Request:**
+`GET /api/orders/550e8400-e29b-41d4-a716-446655440000`
+
+**Response:**
+`200 OK`
+```json
+{
+  "orderId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "SUCCESS",
+  "payload": {
+    "baseToken": "SOL",
+    "quoteToken": "USDC",
+    "amount": 1.5,
+    "type": "MARKET"
+  },
+  "createdAt": "2023-10-27T10:00:00.000Z",
+  "updatedAt": "2023-10-27T10:00:05.000Z"
+}
+```
+
+## 12. Tech Stack
 
 *   **Node.js + TypeScript:** Provides strong typing for domain logic and high concurrency for I/O-bound operations.
 *   **Fastify:** Low-overhead web framework optimized for throughput.
@@ -199,7 +273,7 @@ Operational health check.
 *   **Redis + BullMQ:** Robust message queue for asynchronous job processing with atomic job locking.
 *   **WebSockets (ws):** Standard protocol for real-time event streaming.
 
-## 11. Local Development Setup (WSL-friendly)
+## 13. Usage / Getting Started
 
 For Windows users, running inside WSL (Windows Subsystem for Linux) is required due to Redis persistence dependencies.
 
@@ -230,19 +304,34 @@ For Windows users, running inside WSL (Windows Subsystem for Linux) is required 
     MOCK_DEX_FORCE_FAIL=false
     ```
 
-5.  **Run:**
+5.  **Start API and Workers:**
+    The development command starts both the Fastify API server and the BullMQ worker in the same process for convenience.
     ```bash
     npm run dev
     ```
+    *   API runs on `http://localhost:7542`
+    *   WebSocket runs on `ws://localhost:7542`
 
-## 12. Trade-offs & Future Improvements
+## 14. Feature Summary / Roadmap
+
+- [x] **Idempotent Order Creation**: Database-level enforcement against duplicate requests.
+- [x] **Asynchronous Execution**: Non-blocking API with Redis-backed job queue.
+- [x] **Atomic State Transitions**: Concurrency-safe database updates.
+- [x] **Real-time Updates**: WebSocket event streaming for order status.
+- [x] **Fault Tolerance**: Automatic handling of worker failures and race conditions.
+- [ ] **Authentication**: JWT/API Key protection for endpoints.
+- [ ] **Rate Limiting**: Protection against DDoS and abuse.
+- [ ] **Dead Letter Queue**: Manual inspection and replay of failed jobs.
+- [ ] **Metrics Dashboard**: Prometheus/Grafana integration.
+
+## 15. Trade-offs & Future Improvements
 
 *   **Authentication:** Omitted for scope. Production would require JWT/API Key authentication.
 *   **Rate Limiting:** Not implemented. Essential for protecting the API from abuse.
 *   **Dead Letter Queue (DLQ):** Failed jobs currently stay in the failed set. A DLQ would allow for inspection and manual replay.
 *   **Metrics:** Prometheus/Grafana integration would be added for monitoring queue depth and execution latency.
 
-## 13. Final Notes
+## 16. Final Notes
 
 This assignment demonstrates the implementation of a robust, concurrency-safe backend system. It prioritizes correctness over feature breadth, ensuring that financial primitives (orders) are handled with strict guarantees against double-execution and race conditions. The system assumes a reliable database and queue infrastructure to maintain data integrity.
 

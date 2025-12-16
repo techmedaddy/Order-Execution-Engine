@@ -1,5 +1,6 @@
-import { wsClients } from "./ws.server";
-import { OrderStatus } from "../domain/order.types";
+import WebSocket from 'ws';
+import { wsClients } from './ws.server';
+import { OrderStatus } from '../domain/order.types';
 
 export function publishOrderEvent(
   orderId: string,
@@ -7,6 +8,10 @@ export function publishOrderEvent(
   currentStatus: OrderStatus,
   meta?: Record<string, unknown>
 ): void {
+  if (!wsClients || wsClients.size === 0) {
+    return; // valid: no subscribers
+  }
+
   const message = JSON.stringify({
     orderId,
     previousStatus,
@@ -16,8 +21,15 @@ export function publishOrderEvent(
   });
 
   for (const client of wsClients) {
-    if (client.readyState === 1) {
-      client.send(message);
+    if (!client) continue;
+
+    try {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    } catch {
+      // Never crash business logic because of WS
+      wsClients.delete(client);
     }
   }
 }
