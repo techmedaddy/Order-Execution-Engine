@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  api:
+  backend:
     build: .
     container_name: order-execution-api
     ports:
@@ -33,6 +33,22 @@ services:
       - "6379:6379"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
 volumes:
   pgdata:

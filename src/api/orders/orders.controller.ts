@@ -1,5 +1,6 @@
 import { ExecuteOrderRequestSchema } from './orders.schema';
 import { executeOrderService } from './orders.service';
+import { ordersCreated } from '../../metrics/prometheus';
 import { findOrderById } from '../../persistence/order.repository';
 import { ZodError } from 'zod';
 
@@ -25,6 +26,8 @@ export async function executeOrderController(request: any, reply: any): Promise<
   throw err; // real server bug
 }
 
+  // Instrument: count order creation requests
+  ordersCreated.inc();
 
   const orderId = await executeOrderService(body, idempotencyKey);
 

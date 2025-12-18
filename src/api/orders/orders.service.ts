@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { ExecuteOrderRequest } from './orders.schema';
 import { orderQueue } from '../../queue/order.queue';
+import { queueDepth } from '../../metrics/prometheus';
 import { createOrder } from '../../domain/order.entity';
 import { createOrder as persistOrder, updateOrderStatus } from '../../persistence/order.repository';
 import { OrderType, OrderStatus } from '../../domain/order.types';
@@ -36,6 +37,9 @@ export async function executeOrderService(
     // Emit QUEUED event
     publishOrderEvent(orderId, OrderStatus.CREATED, OrderStatus.QUEUED);
     
+    // Instrument: increment queue depth when enqueuing job
+    queueDepth.inc();
+
     await orderQueue.add('execute-order', {
       orderId,
       payload
