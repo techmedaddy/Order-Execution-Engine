@@ -4,44 +4,49 @@ import { isTerminalState } from '../domain/order.state-machine';
 import { routeDex } from './dex.router';
 import { settleOrder } from './settlement.service';
 import {
-  findOrderById,
   claimOrderForExecution,
+  findOrderById,
   transitionToTerminalStatus,
 } from '../persistence/order.repository';
 import { setOrderStatus } from '../persistence/order.cache';
 import { publishOrderEvent } from '../websocket/ws.publisher';
-
 import {
   ordersExecutedTotal,
   orderExecutionDuration,
 } from '../metrics/prometheus';
 
-export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
-  // ⛔ Guard: already terminal
+export async function executeOrder(
+  job: ExecuteOrderJob
+): Promise<void> {
+  // 0. Terminal guard
   const existingOrder = await findOrderById(job.orderId);
   if (existingOrder && isTerminalState(existingOrder.status)) {
     return;
   }
 
-  // 🔒 Atomic claim
+  // 1. Atomic claim
   const order = await claimOrderForExecution(job.orderId);
   if (!order) {
     return;
   }
 
-  // Sync EXECUTING state
+  // 2. EXECUTING state
   await setOrderStatus(order.id, OrderStatus.EXECUTING);
-  publishOrderEvent(order.id, OrderStatus.QUEUED, OrderStatus.EXECUTING);
+  publishOrderEvent(
+    order.id,
+    OrderStatus.QUEUED,
+    OrderStatus.EXECUTING
+  );
 
-  // ⏱️ Execution latency metric
+  // ⏱ execution latency metric
   const endTimer = orderExecutionDuration.startTimer();
 
   try {
-    // Execute order
+    // 3. Execute
     const dex = await routeDex(job.payload);
     const result = await settleOrder(dex, job.payload);
 
-    // Transition → SUCCESS (idempotent)
+    // 4. SUCCESS (idempotent)
     const updated = await transitionToTerminalStatus(
       order.id,
       OrderStatus.SUCCESS
@@ -50,20 +55,18 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
     if (updated) {
       await setOrderStatus(order.id, OrderStatus.SUCCESS);
 
+      // ✅ wrap result, don’t cast
       publishOrderEvent(
         order.id,
         OrderStatus.EXECUTING,
         OrderStatus.SUCCESS,
-        result as unknown as Record<string, unknown> // ✅ explicit + correct
+        { result }
       );
     }
 
-    // ✅ Metrics
+    // 📈 metric
     ordersExecutedTotal.inc();
-    endTimer();
   } catch (error) {
-    endTimer();
-
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
 
@@ -74,7 +77,6 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
 
     if (updated) {
       await setOrderStatus(order.id, OrderStatus.FAILED);
-
       publishOrderEvent(
         order.id,
         OrderStatus.EXECUTING,
@@ -82,7 +84,7 @@ export async function executeOrder(job: ExecuteOrderJob): Promise<void> {
         { error: errorMessage }
       );
     }
-
-    // ❌ No rethrow — retries intentionally disabled
+  } finally {
+    endTimer();
   }
 }
