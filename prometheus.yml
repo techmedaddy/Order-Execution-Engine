@@ -5,4 +5,5 @@ scrape_configs:
   - job_name: "order-execution-engine"
     metrics_path: /metrics
     static_configs:
-      - targets: ["backend:7542"]
+      - targets:
+          - backend:7542

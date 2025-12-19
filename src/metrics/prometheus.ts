@@ -1,27 +1,36 @@
-import client from "prom-client";
+import client from 'prom-client';
 
-client.collectDefaultMetrics();
+export const register = new client.Registry();
+client.collectDefaultMetrics({ register });
 
-export const httpRequestDuration = new client.Histogram({
-  name: "http_request_duration_ms",
-  help: "HTTP request latency",
-  labelNames: ["method", "route", "status"],
-  buckets: [50, 100, 200, 300, 500, 1000, 2000],
+export const ordersCreatedTotal = new client.Counter({
+  name: 'orders_created_total',
+  help: 'Total number of orders created',
+  registers: [register],
 });
 
-export const ordersCreated = new client.Counter({
-  name: "orders_created_total",
-  help: "Total number of orders created",
+export const ordersExecutedTotal = new client.Counter({
+  name: 'orders_executed_total',
+  help: 'Total number of orders executed',
+  registers: [register],
+});
+
+export const orderExecutionDuration = new client.Histogram({
+  name: 'order_execution_duration_seconds',
+  help: 'Order execution latency',
+  buckets: [0.1, 0.3, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
+// 👇 REQUIRED FOR WORKER INSTRUMENTATION
+export const workersActive = new client.Gauge({
+  name: 'workers_active',
+  help: 'Number of active order execution workers',
+  registers: [register],
 });
 
 export const queueDepth = new client.Gauge({
-  name: "order_queue_depth",
-  help: "Current BullMQ queue depth",
+  name: 'queue_depth',
+  help: 'Number of jobs waiting in the queue',
+  registers: [register],
 });
-
-export const workersActive = new client.Gauge({
-  name: "order_workers_active",
-  help: "Active BullMQ workers",
-});
-
-export const register = client.register;
