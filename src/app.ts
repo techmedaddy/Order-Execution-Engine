@@ -18,11 +18,12 @@ app.register(fastifyCors, {
   ],
 });
 
-app.get('/health', async () => {
+// Register all routes under /api prefix for consistency
+app.get('/api/health', async () => {
   return { ok: true };
 });
 
-app.get('/metrics', async (_req, reply) => {
+app.get('/api/metrics', async (_req, reply) => {
   reply
     .header('Content-Type', register.contentType)
     .send(await register.metrics());

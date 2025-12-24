@@ -1,6 +1,9 @@
-import { executeOrderController, getOrderController, resetController } from './orders.controller';
+import { executeOrderController, getOrderController, resetController, listOrdersController } from './orders.controller';
 
 export function registerOrderRoutes(fastify: any): void {
+  // List all orders (must come before /:id to avoid route collision)
+  fastify.get('/api/orders', listOrdersController);
+  
   fastify.post('/api/orders/execute', executeOrderController);
   fastify.get('/api/orders/:id', getOrderController);
   

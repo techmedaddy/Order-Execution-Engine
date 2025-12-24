@@ -128,3 +128,18 @@ export async function claimOrderForExecution(orderId: string): Promise<Order | n
     idempotencyKey: row.idempotency_key
   };
 }
+
+export async function findAllOrders(limit: number = 100): Promise<Order[]> {
+  const result = await pgPool.query(
+    'SELECT id, payload, status, created_at, updated_at FROM orders ORDER BY created_at DESC LIMIT $1',
+    [limit]
+  );
+
+  return result.rows.map(row => ({
+    id: row.id,
+    payload: row.payload,
+    status: row.status as OrderStatus,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }));
+}

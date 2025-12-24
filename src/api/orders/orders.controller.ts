@@ -1,7 +1,7 @@
 import { ExecuteOrderRequestSchema } from './orders.schema';
 import { executeOrderService, resetSystemState } from './orders.service';
 import { ordersCreatedTotal } from '../../metrics/prometheus';
-import { findOrderById } from '../../persistence/order.repository';
+import { findOrderById, findAllOrders } from '../../persistence/order.repository';
 import { ZodError } from 'zod';
 
 export async function executeOrderController(
@@ -76,4 +76,21 @@ export async function resetController(
       details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
+}
+
+export async function listOrdersController(
+  request: any,
+  reply: any
+): Promise<void> {
+  const orders = await findAllOrders();
+
+  reply.send({
+    orders: orders.map(order => ({
+      orderId: order.id,
+      payload: order.payload,
+      status: order.status,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+    }))
+  });
 }
