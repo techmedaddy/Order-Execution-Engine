@@ -1,5 +1,5 @@
 import { ExecuteOrderRequestSchema } from './orders.schema';
-import { executeOrderService } from './orders.service';
+import { executeOrderService, resetSystemState } from './orders.service';
 import { ordersCreatedTotal } from '../../metrics/prometheus';
 import { findOrderById } from '../../persistence/order.repository';
 import { ZodError } from 'zod';
@@ -57,4 +57,23 @@ export async function getOrderController(
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
   });
+}
+
+export async function resetController(
+  request: any,
+  reply: any
+): Promise<void> {
+  try {
+    await resetSystemState();
+    reply.code(200).send({ 
+      ok: true,
+      message: 'System state reset successfully'
+    });
+  } catch (error) {
+    reply.code(500).send({ 
+      ok: false,
+      error: 'Failed to reset system state',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 }
