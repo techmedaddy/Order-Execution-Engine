@@ -4,7 +4,12 @@ export function registerOrderRoutes(fastify: any): void {
   // List all orders (must come before /:id to avoid route collision)
   fastify.get('/api/orders', listOrdersController);
   
+  // POST /api/orders - alias for /api/orders/execute to match frontend contract
+  fastify.post('/api/orders', executeOrderController);
+  
+  // Legacy endpoint maintained for backward compatibility
   fastify.post('/api/orders/execute', executeOrderController);
+  
   fastify.get('/api/orders/:id', getOrderController);
   
   // Register a custom JSON parser that allows empty bodies for /api/reset
