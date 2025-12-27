@@ -1,15 +1,4 @@
 services:
-  backend:
-    build: .
-    ports:
-      - "7542:7542"
-    env_file:
-      - .env
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
-
   postgres:
     image: postgres:16
     container_name: order-postgres
@@ -21,6 +10,11 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   redis:
@@ -31,6 +25,22 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     restart: unless-stopped
 
+  backend:
+    build: .
+    container_name: order-backend
+    ports:
+      - "7542:7542"
+    environment:
+      PORT: 7542
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus
     container_name: order-prometheus
@@ -39,7 +49,8 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
 
   grafana:
     image: grafana/grafana
@@ -47,7 +58,8 @@ services:
     ports:
       - "3030:3000"
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
 
 volumes:
   pgdata:
