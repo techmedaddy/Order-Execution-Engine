@@ -1,4 +1,3 @@
-
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   base_token TEXT NOT NULL,
@@ -8,3 +7,4 @@ CREATE TABLE IF NOT EXISTS orders (
   idempotency_key TEXT UNIQUE NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
