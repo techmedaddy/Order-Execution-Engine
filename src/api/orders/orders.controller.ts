@@ -29,7 +29,6 @@ export async function executeOrderController(
     throw err;
   }
 
-  // ✅ METRIC: order creation
   ordersCreatedTotal.inc();
 
   const orderId = await executeOrderService(body, idempotencyKey);
@@ -55,7 +54,6 @@ export async function getOrderController(
     payload: order.payload,
     status: order.status,
     createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString(),
   });
 }
 
@@ -65,15 +63,15 @@ export async function resetController(
 ): Promise<void> {
   try {
     await resetSystemState();
-    reply.code(200).send({ 
+    reply.code(200).send({
       ok: true,
-      message: 'System state reset successfully'
+      message: 'System state reset successfully',
     });
   } catch (error) {
-    reply.code(500).send({ 
+    reply.code(500).send({
       ok: false,
       error: 'Failed to reset system state',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 }
@@ -90,7 +88,6 @@ export async function listOrdersController(
       payload: order.payload,
       status: order.status,
       createdAt: order.createdAt.toISOString(),
-      updatedAt: order.updatedAt.toISOString(),
-    }))
+    })),
   });
 }
