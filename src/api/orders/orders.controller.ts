@@ -33,6 +33,7 @@ export async function executeOrderController(
 
   const orderId = await executeOrderService(body, idempotencyKey);
 
+  // create endpoint intentionally returns only orderId
   reply.code(202).send({ orderId });
 }
 
@@ -51,9 +52,13 @@ export async function getOrderController(
 
   reply.send({
     orderId: order.id,
-    payload: order.payload,
+    payload: {
+      ...order.payload, // includes type
+    },
     status: order.status,
     createdAt: order.createdAt.toISOString(),
+    updatedAt: order.updatedAt.toISOString(),
+    idempotencyKey: order.idempotencyKey,
   });
 }
 
@@ -85,9 +90,13 @@ export async function listOrdersController(
   reply.send({
     orders: orders.map(order => ({
       orderId: order.id,
-      payload: order.payload,
+      payload: {
+        ...order.payload, // includes type
+      },
       status: order.status,
       createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      idempotencyKey: order.idempotencyKey,
     })),
   });
 }

@@ -44,6 +44,10 @@ export async function createOrder(order: Order): Promise<string> {
     [order.idempotencyKey]
   );
 
+  if (existing.rows.length === 0) {
+    throw new Error('Idempotency conflict but order not found');
+  }
+
   return existing.rows[0].id;
 }
 
