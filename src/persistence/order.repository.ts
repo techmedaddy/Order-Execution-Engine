@@ -12,11 +12,13 @@ export async function createOrder(order: Order): Promise<string> {
       base_token,
       quote_token,
       amount,
+      type,
       status,
       idempotency_key,
-      created_at
+      created_at,
+      updated_at
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     ON CONFLICT (idempotency_key) DO NOTHING
     RETURNING id
     `,
@@ -25,9 +27,11 @@ export async function createOrder(order: Order): Promise<string> {
       order.payload.baseToken,
       order.payload.quoteToken,
       order.payload.amount,
+      order.payload.type,
       order.status,
       order.idempotencyKey,
       order.createdAt,
+      order.updatedAt,
     ]
   );
 
@@ -50,7 +54,7 @@ export async function updateOrderStatus(
   status: OrderStatus
 ): Promise<void> {
   await pgPool.query(
-    `UPDATE orders SET status = $1 WHERE id = $2`,
+    `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`,
     [status, orderId]
   );
 }
@@ -62,7 +66,7 @@ export async function transitionToTerminalStatus(
   const result = await pgPool.query(
     `
     UPDATE orders
-    SET status = $1
+    SET status = $1, updated_at = NOW()
     WHERE id = $2 AND status = 'EXECUTING'
     RETURNING id
     `,
@@ -82,8 +86,10 @@ export async function findOrderById(orderId: string): Promise<Order | null> {
       base_token,
       quote_token,
       amount,
+      type,
       status,
       created_at,
+      updated_at,
       idempotency_key
     FROM orders
     WHERE id = $1
@@ -101,9 +107,11 @@ export async function findOrderById(orderId: string): Promise<Order | null> {
       baseToken: row.base_token,
       quoteToken: row.quote_token,
       amount: row.amount,
+      type: row.type,
     },
     status: row.status as OrderStatus,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     idempotencyKey: row.idempotency_key,
   };
 }
@@ -116,8 +124,10 @@ export async function findAllOrders(limit = 100): Promise<Order[]> {
       base_token,
       quote_token,
       amount,
+      type,
       status,
       created_at,
+      updated_at,
       idempotency_key
     FROM orders
     ORDER BY created_at DESC
@@ -132,9 +142,11 @@ export async function findAllOrders(limit = 100): Promise<Order[]> {
       baseToken: row.base_token,
       quoteToken: row.quote_token,
       amount: row.amount,
+      type: row.type,
     },
     status: row.status as OrderStatus,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     idempotencyKey: row.idempotency_key,
   }));
 }
@@ -147,15 +159,17 @@ export async function claimOrderForExecution(
   const result = await pgPool.query(
     `
     UPDATE orders
-    SET status = 'EXECUTING'
+    SET status = 'EXECUTING', updated_at = NOW()
     WHERE id = $1 AND status = 'QUEUED'
     RETURNING
       id,
       base_token,
       quote_token,
       amount,
+      type,
       status,
       created_at,
+      updated_at,
       idempotency_key
     `,
     [orderId]
@@ -171,9 +185,11 @@ export async function claimOrderForExecution(
       baseToken: row.base_token,
       quoteToken: row.quote_token,
       amount: row.amount,
+      type: row.type,
     },
     status: row.status as OrderStatus,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     idempotencyKey: row.idempotency_key,
   };
 }
